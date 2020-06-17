@@ -1,0 +1,2 @@
+L'adresse I2C du capteur Pimonori est 0x76
+Il faut modifier cette adresse dans le fichier Adafruit_BME680.h (adafruit utilise l'adresse 0x77)
