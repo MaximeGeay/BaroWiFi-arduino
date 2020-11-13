@@ -1,18 +1,21 @@
+//VERSION 1.1
 
+#include <Senses_wifi.h>
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
-#include "Adafruit_BME680.h"
+#include <Adafruit_BME680.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <EEPROM.h>
+#include <SoftwareSerial.h>
 
-
-
+SoftwareSerial db9(13,15);
 String ssid="";
 String password="";
 // UDP variables
 
 unsigned int destPort =50000;
+unsigned int destPortSec=10110; //Port Miniplex 
 IPAddress ipLocal;
 IPAddress destIP;
 
@@ -20,6 +23,7 @@ char packetBuffer[UDP_TX_PACKET_MAX_SIZE]; //buffer to hold incoming packet,
 
 
 WiFiUDP UDP;
+WiFiUDP UDPSec;
 Adafruit_BME680 bme; // I2C
 
 int OffsetPress=0; //enPa
@@ -34,6 +38,8 @@ int eeintervalBaro=50;
 int eeSSID=60;
 int eePWD=110;
 int eeBaudRate=200;
+int eePortUdpSec=210;
+int eeMDAStatus=220;
 
 
 bool bFirstRun=false;
@@ -44,6 +50,7 @@ unsigned long intervalBaro=2000;
 unsigned long previousBaro = 0;
 bool bWifiConnected=false;
 long nBaudRate=4800;
+bool bMDAStatus=false;
 
 
 
@@ -51,13 +58,14 @@ long nBaudRate=4800;
 void setup() {
 
 
-initSerial();
+initdb9();
 initValues();
 initWifi();
   
   
   if (!bme.begin()) {
-    Serial.println("Could not find a valid BME680 sensor, check wiring!");
+    db9.println("Could not find a valid BME680 sensor, check wiring!");
+
     while (1);
   }
 
@@ -87,6 +95,7 @@ void loop() {
   char trameTemp[50];
   char trameHumidity[50];
   char trameWeather[100];
+  char trameMDA[200];
   int nCS=0;
   
 
@@ -94,7 +103,7 @@ void loop() {
   if ((unsigned long)(currentMillis - previousBaro) >= intervalBaro)
  {
       if (! bme.performReading()) {
-      Serial.println("Failed to perform reading :(");
+      db9.println("Failed to perform reading :(");
       return;
       }
 
@@ -112,24 +121,35 @@ void loop() {
     sprintf(tramePress, "$IIXDR,P,%s,B,Barometer*", cPression);
     nCS=getCheckSum(tramePress);
     sprintf(tramePress,"%s%02x",tramePress,nCS);
-   // Serial.println(tramePress);
+   // db9.println(tramePress);
 
     sprintf(trameTemp, "$IIXDR,C,%s,C,Temperature*", cTemp);
     nCS=getCheckSum(trameTemp);
     sprintf(trameTemp,"%s%02x",trameTemp,nCS);
-   // Serial.println(trameTemp);
+   // db9.println(trameTemp);
 
     sprintf(trameHumidity,"$IIXDR,H,%s,P,Humidity*", cHumidity);
     nCS=getCheckSum(trameHumidity);
     sprintf(trameHumidity,"%s%02x",trameHumidity,nCS);
-   // Serial.println(trameHumidity);
+   // db9.println(trameHumidity);
 
     sprintf(trameWeather,"$IIXDR,P,%s,B,Barometer,C,%s,C,Temperature,H,%s,P,Humidity*",cPression,cTemp,cHumidity);
     nCS=getCheckSum(trameWeather);
     sprintf(trameWeather,"%s%02x",trameWeather,nCS);
-    Serial.println(trameWeather);
-
+    db9.println(trameWeather);
     sendUdpMsg(trameWeather,sizeof(trameWeather));
+    sendUdpMsgSec(trameWeather,sizeof(trameWeather));
+
+    if(bMDAStatus==1)
+    {
+    sprintf(trameMDA,"$IIMDA,0.0,I,%s,B,%s,C,0.0,C,%s,%s,0.0,C,0.0,T,0.0,M,0.0,N,0.0,N*",cPression,cTemp,cHumidity,cHumidity);
+    nCS=getCheckSum(trameMDA);
+    sprintf(trameMDA,"%s%02x",trameMDA,nCS);
+    db9.println(trameMDA);
+    sendUdpMsg(trameMDA,sizeof(trameMDA));
+    sendUdpMsgSec(trameMDA,sizeof(trameMDA));
+    }
+    
      
   
 
@@ -140,13 +160,13 @@ void loop() {
 
   
   String sBuffer;
-  if(Serial.available())
+  if(db9.available())
   {
-    sBuffer=Serial.readString();
+    sBuffer=db9.readString();
     int strLen=sBuffer.length()+1;
-    char serialBuffer[strLen];
-    sBuffer.toCharArray(serialBuffer,strLen);
-    decodeTrame(serialBuffer);
+    char db9Buffer[strLen];
+    sBuffer.toCharArray(db9Buffer,strLen);
+    decodeTrame(db9Buffer);
   }
 
     
@@ -160,7 +180,7 @@ void loop() {
     // read the packet into packetBufffer
     int n = UDP.read(packetBuffer, UDP_TX_PACKET_MAX_SIZE);
     packetBuffer[n] = 0;
-    Serial.println(packetBuffer); 
+    db9.println(packetBuffer); 
     decodeTrame(packetBuffer);
 
   }
@@ -171,7 +191,7 @@ void loop() {
 
 
 /**********************FONCTIONS*************************************/
-void initSerial(void)
+void initdb9(void)
 {
   EEPROM.begin(512);
 
@@ -189,7 +209,7 @@ void initSerial(void)
     nBaudRate=4800;
   }
 
-  Serial.begin(nBaudRate);
+  db9.begin(nBaudRate);
   delay(2000);
   
   
@@ -198,16 +218,16 @@ void initSerial(void)
 void initWifi(void)
 {
   char msg[50];
-  Serial.println();
-  Serial.println();
+  db9.println();
+  db9.println();
   EEPROM.begin(512);
 
   ssid=read_String(eeSSID);
 
   password=read_String(eePWD);
 
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
+  db9.print("Connecting to ");
+  db9.println(ssid);
 
   WiFi.mode(WIFI_STA);
   String NoPwd="NO";
@@ -234,17 +254,17 @@ void initWifi(void)
       int nDiff=currentMillis-beginMillis;
       int nTimeout=intervalWifi-nDiff;
       nTimeout=nTimeout/1000;
-      Serial.print("Timeout WiFi dans ");
-      Serial.print(nTimeout);
-      Serial.println("s.");
+      db9.print("Timeout WiFi dans ");
+      db9.print(nTimeout);
+      db9.println("s.");
       
     }
     b=!b;
     if(currentMillis-beginMillis>intervalWifi)
     {
       bWifiConnected=false;
-      Serial.print("Echec de la connexion au reseau ");
-      Serial.println(ssid);
+      db9.print("Echec de la connexion au reseau ");
+      db9.println(ssid);
       break;
     }
     else
@@ -254,33 +274,32 @@ void initWifi(void)
     delay(500);
   }
      
-  Serial.println("");
+  db9.println("");
   if(bWifiConnected)
   {
     ipLocal=WiFi.localIP();
-    Serial.println("WiFi connected");  
-  Serial.print("IP address: ");
-  Serial.println(ipLocal);
-  Serial.print("Broadcast IP address: ");
-  Serial.println(destIP);
-  Serial.print("Udp Port: ");
-  Serial.println(destPort);
+    db9.println("WiFi connected");  
+  db9.print("IP address: ");
+  db9.println(ipLocal);
+  db9.print("Broadcast IP address: ");
+  db9.println(destIP);
+  db9.print("Udp Port: ");
+  db9.println(destPort);
+  db9.print("Udp Port secondaire: ");
+  db9.println(destPortSec);
+  sprintf(msg,"$BARO,WiFiConnected,true,\n");
 
-          sprintf(msg,"$BARO,WiFiConnected,true,\n");
-       
-          
-        
-        
    UDP.begin(destPort);
+   UDPSec.begin(destPortSec);
   }
   else
   {
-    Serial.println("WiFi not connected");  
+    db9.println("WiFi not connected");  
     sprintf(msg,"$BARO,WiFiConnected,false,\n");
   }
 
   sendUdpMsg(msg,sizeof(msg));
-  Serial.print(msg);
+  db9.println(msg);
 
 
 }
@@ -294,8 +313,8 @@ void initValues(void)
   EEPROM.begin(512);
 
   EEPROM.get(eeFirstRun,bFirstRun);
-  Serial.print("First Run: ");
-  Serial.println(bFirstRun);
+  db9.print("First Run: ");
+  db9.println(bFirstRun);
 
   if(bFirstRun!=0) //init des valeurs par défaut
   {
@@ -319,15 +338,17 @@ void initValues(void)
     EEPROM.put(eeDestIp+3,destIP[3]);
     EEPROM.put(eePortUdp,50000);
     EEPROM.put(eeintervalBaro,2000);
-    EEPROM.put(eeIntervalWifi,60000);
+    EEPROM.put(eeIntervalWifi,1000);
     EEPROM.put(eeFirstRun,bFirstRun);
+    EEPROM.put(eePortUdpSec,10110);
+    EEPROM.put(eeMDAStatus,false);
 
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
            
            
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
     
    
@@ -342,6 +363,8 @@ void initValues(void)
   EEPROM.get(eePortUdp,destPort);
   EEPROM.get(eeintervalBaro,intervalBaro);
   EEPROM.get(eeIntervalWifi,intervalWifi);
+  EEPROM.get(eePortUdpSec,destPortSec);
+  EEPROM.get(eeMDAStatus,bMDAStatus);
   
  
   
@@ -367,7 +390,13 @@ void sendUdpMsg(char *sMsg,int msgSize)
     UDP.write(sMsg, msgSize); 
     UDP.endPacket(); 
     
-    
+}
+
+void sendUdpMsgSec(char *sMsg,int msgSize)
+{
+    UDPSec.beginPacket(destIP, destPortSec); 
+    UDPSec.write(sMsg, msgSize); 
+    UDPSec.endPacket(); 
 }
 
 void decodeTrame(char sTrame[])
@@ -377,8 +406,8 @@ char msg[50];
 char copyTrame[100];
 strcpy(copyTrame,sTrame);
 
-Serial.print("copyTrame ");
-Serial.println(copyTrame);
+db9.print("copyTrame ");
+db9.println(copyTrame);
 
 
 mot=strtok(sTrame,",");
@@ -394,14 +423,14 @@ if(strcmp(mot,"$BARO")==0)
         EEPROM.put(eeFirstRun,1);
 
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
             UDP.stop();
             WiFi.disconnect();
            initValues();
            initWifi();
            
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
       }
       
@@ -413,7 +442,7 @@ if(strcmp(mot,"$BARO")==0)
         dtostrf(OffsetPress, 4, 0, cOffset);
         sprintf(msg,"$BARO,PressureOffset,%s,\n",cOffset);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
         
        }
 
@@ -425,7 +454,7 @@ if(strcmp(mot,"$BARO")==0)
         dtostrf(OffsetTemp, 4, 0, cOffset);
         sprintf(msg,"$BARO,TemperatureOffset,%s,\n",cOffset);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
        }
 
        if(strcmp(mot,"getIpAddress")==0)
@@ -434,7 +463,7 @@ if(strcmp(mot,"$BARO")==0)
         sprintf(ip,"%s",WiFi.localIP().toString().c_str());
         sprintf(msg,"$BARO,IpAddress,%s,\n",ip);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
        }
 
        if(strcmp(mot,"getBroadcastAddress")==0)
@@ -443,27 +472,34 @@ if(strcmp(mot,"$BARO")==0)
         sprintf(ip,"%s",destIP.toString().c_str());
         sprintf(msg,"$BARO,BroadcastAddress,%s,\n",ip);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
         
        }
        if(strcmp(mot,"getUdpPort")==0)
        {
         sprintf(msg,"$BARO,UdpPort,%d,\n",destPort);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
+       }
+
+       if(strcmp(mot,"getUdpPortSec")==0)
+       {
+        sprintf(msg,"$BARO,UdpPortSec,%d,\n",destPortSec);
+        sendUdpMsg(msg,sizeof(msg));
+        db9.println(msg);
        }
 
        if(strcmp(mot,"getPeriod")==0)
        {
-        Serial.println("getPeriod");
+        db9.println("getPeriod");
         sprintf(msg,"$BARO,period,%d,\n",intervalBaro);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
        }
 
        if(strcmp(mot,"getWiFiStatus")==0)
        {
-        Serial.println("getWiFiStatus");
+        db9.println("getWiFiStatus");
         if(bWifiConnected)
         {
           sprintf(msg,"$BARO,WiFiConnected,true,\n");
@@ -473,7 +509,7 @@ if(strcmp(mot,"$BARO")==0)
           sprintf(msg,"$BARO,WiFiConnected,false,\n");
         }
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
        }
 
        if(strcmp(mot,"getSSID")==0)
@@ -481,102 +517,110 @@ if(strcmp(mot,"$BARO")==0)
         char buf[100];
         unsigned int len=ssid.length();
         ssid.toCharArray(buf,len+1);
-        Serial.println("getSSID");
+        db9.println("getSSID");
         sprintf(msg,"$BARO,SSID,%s,\n",buf);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
        }
 
        if(strcmp(mot,"getTimeoutWiFi")==0)
        {
         sprintf(msg,"$BARO,timeoutWiFi,%d,\n",intervalWifi);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
        }
 
        if(strcmp(mot,"getBaudRate")==0)
        {
         sprintf(msg,"$BARO,baudRate,%d,\n",nBaudRate);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
+       }
+
+       if(strcmp(mot,"getMDAStatus")==0)
+       {
+        db9.println("getMDAStatus");
+        sprintf(msg,"$BARO,MDAStatus,%d,\n",bMDAStatus);
+        sendUdpMsg(msg,sizeof(msg));
+        db9.println(msg);
        }
 
        if(strcmp(mot,"setPressureOffset")==0)
        {
-        Serial.println("setPressureOffset");
+        db9.println("setPressureOffset");
         char enTete[10];
         char type[20];
           int data;
 
-         Serial.print("sTrame ");
-        Serial.println(copyTrame);
+         db9.print("sTrame ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%17s,%d,",&enTete,&type,&data);
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data ");
-        Serial.println(data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
         
        
         EEPROM.put(eePressAddress,data);
         
  
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
            OffsetPress=data;
            char cOffset[5];
            dtostrf(OffsetPress, 4, 0, cOffset);
            sprintf(msg,"$BARO,PressureOffset,%s,\n",cOffset);
             sendUdpMsg(msg,sizeof(msg));
-            Serial.print(msg);
+            db9.println(msg);
           
            
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
           
        }
        if(strcmp(mot,"setTemperatureOffset")==0)
        {
-        Serial.println(mot);
-        Serial.println("setTemperatureOffset");
+        db9.println(mot);
+        db9.println("setTemperatureOffset");
         char enTete[10];
         char type[20];
           int data;
 
-         Serial.print("sTrame ");
-        Serial.println(copyTrame);
+         db9.print("sTrame ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%20s,%d,",&enTete,&type,&data);
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data ");
-        Serial.println(data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
         
        
         EEPROM.put(eeTempAddress,data);
         
  
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
            OffsetTemp=data;
            char cOffset[5];
            dtostrf(OffsetTemp, 4, 0, cOffset);
            sprintf(msg,"$BARO,TemperatureOffset,%s,\n",cOffset);
             sendUdpMsg(msg,sizeof(msg));
-            Serial.print(msg);
+            db9.println(msg);
           
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
           
        }
        if(strcmp(mot,"setBroadcastAddress")==0)
        {
-        Serial.println(mot);
-        Serial.println("setBroadcastAddress");
+        db9.println(mot);
+        db9.println("setBroadcastAddress");
         char enTete[10];
         char type[20];
           int data1;
@@ -584,21 +628,21 @@ if(strcmp(mot,"$BARO")==0)
           int data3;
           int data4;
 
-         Serial.print("sTrame ");
-        Serial.println(copyTrame);
+         db9.print("sTrame ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%19s,%d.%d.%d.%d,",&enTete,&type,&data1,&data2,&data3,&data4);
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data1 ");
-        Serial.println(data1);
-        Serial.print("data2 ");
-        Serial.println(data2);
-        Serial.print("data3 ");
-        Serial.println(data3);
-        Serial.print("data4 ");
-        Serial.println(data4);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data1 ");
+        db9.println(data1);
+        db9.print("data2 ");
+        db9.println(data2);
+        db9.print("data3 ");
+        db9.println(data3);
+        db9.print("data4 ");
+        db9.println(data4);
         
         IPAddress ip(data1,data2,data3,data4);
         EEPROM.put(eeDestIp,ip[0]);
@@ -608,79 +652,141 @@ if(strcmp(mot,"$BARO")==0)
        
         
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
 
            destIP=ip;
            char sIp[20];
         sprintf(sIp,"%s",destIP.toString().c_str());
         sprintf(msg,"$BARO,BroadcastAddress,%s,\n",sIp);
         sendUdpMsg(msg,sizeof(msg));
-        Serial.print(msg);
+        db9.println(msg);
         
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
           
        }
 
        if(strcmp(mot,"setUdpPort")==0)
        {
-        Serial.println(mot);
+        db9.println(mot);
         char enTete[10];
         char type[20];
         unsigned int data;
 
-         Serial.print("copyTrame2 ");
-        Serial.println(copyTrame);
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%10s,%d,",&enTete,&type,&data);
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data ");
-        Serial.println(data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
         
         EEPROM.put(eePortUdp,data);
          
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
            destPort=data;
            sprintf(msg,"$BARO,UdpPort,%d,\n",destPort);
            sendUdpMsg(msg,sizeof(msg));
-            Serial.print(msg);
+            db9.println(msg);
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
+         }
+          
+       }
+
+       if(strcmp(mot,"setUdpPortSec")==0)
+       {
+        db9.println(mot);
+        char enTete[10];
+        char type[20];
+        unsigned int data;
+
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
+         sscanf(copyTrame,"%5s,%13s,%d,",&enTete,&type,&data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
+        
+        EEPROM.put(eePortUdpSec,data);
+         
+        if (EEPROM.commit()) {
+           db9.println("EEPROM successfully committed");
+           destPortSec=data;
+           sprintf(msg,"$BARO,UdpPortSec,%d,\n",destPortSec);
+           sendUdpMsg(msg,sizeof(msg));
+            db9.println(msg);
+        } else {
+          db9.println("ERROR! EEPROM commit failed");
+         }
+          
+       }
+
+       if(strcmp(mot,"setMDAStatus")==0)
+       {
+        db9.println(mot);
+        char enTete[10];
+        char type[20];
+        unsigned int data;
+
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
+         sscanf(copyTrame,"%5s,%12s,%d,",&enTete,&type,&data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
+        
+        EEPROM.put(eeMDAStatus,data);
+         
+        if (EEPROM.commit()) {
+           db9.println("EEPROM successfully committed");
+           bMDAStatus=data;
+           sprintf(msg,"$BARO,MDAStatus,%d,\n",bMDAStatus);
+           sendUdpMsg(msg,sizeof(msg));
+            db9.println(msg);
+        } else {
+          db9.println("ERROR! EEPROM commit failed");
          }
           
        }
 
         if(strcmp(mot,"setPeriod")==0)
        {
-        Serial.println(mot);
+        db9.println(mot);
         char enTete[10];
         char type[20];
         unsigned int data;
 
-         Serial.print("copyTrame2 ");
-        Serial.println(copyTrame);
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%9s,%d,",&enTete,&type,&data);
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data ");
-        Serial.println(data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
         
         EEPROM.put(eeintervalBaro,data);
          
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
            intervalBaro=data;
            sprintf(msg,"$BARO,period,%d,\n",intervalBaro);
            sendUdpMsg(msg,sizeof(msg));
-            Serial.print(msg);
+            db9.println(msg);
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
           
        }
@@ -688,14 +794,14 @@ if(strcmp(mot,"$BARO")==0)
        
         if(strcmp(mot,"setSSID")==0)
        {
-        Serial.println(mot);
+        db9.println(mot);
         char enTete[10];
         char type[20];
         char data[100];
         String sData;
 
-         Serial.print("copyTrame2 ");
-        Serial.println(copyTrame);
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%7s,%s,",&enTete,&type,&data);
          sData=data;
          int vir=sData.lastIndexOf(",");
@@ -706,41 +812,41 @@ if(strcmp(mot,"$BARO")==0)
      
          
         
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data ");
-        Serial.println(sData);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(sData);
 
         if(writeString(eeSSID,sData))
         {
-          Serial.println("EEPROM successfully committed");
+          db9.println("EEPROM successfully committed");
            ssid=sData;
            char buf[100];
           unsigned int len=ssid.length();
           ssid.toCharArray(buf,len+1);
            sprintf(msg,"$BARO,SSID,%s,\n",buf);
            sendUdpMsg(msg,sizeof(msg));
-            Serial.println(msg);
+            db9.println(msg);
         }
         else
         {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
         }
           
        }
 
        if(strcmp(mot,"setPassword")==0)
        {
-        Serial.println(mot);
+        db9.println(mot);
         char enTete[10];
         char type[20];
         char data[100];
         String sData;
 
-         Serial.print("copyTrame2 ");
-        Serial.println(copyTrame);
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%11s,%s,",&enTete,&type,&data);
          sData=data;
          int vir=sData.lastIndexOf(",");
@@ -748,27 +854,27 @@ if(strcmp(mot,"$BARO")==0)
          {
           sData=sData.substring(0,vir);
          }
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data ");
-        Serial.println(sData);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(sData);
 
         if(writeString(eePWD,sData))
         {
-          Serial.println("EEPROM successfully committed");
+          db9.println("EEPROM successfully committed");
            password=sData;
            char buf[100];
           unsigned int len=password.length();
           password.toCharArray(buf,len+1);
            sprintf(msg,"$BARO,password,%s,\n",buf);
            //sendUdpMsg(msg,sizeof(msg));
-            Serial.print(msg);
+            db9.println(msg);
         }
         else
         {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
         }
      
           
@@ -776,12 +882,12 @@ if(strcmp(mot,"$BARO")==0)
 
        if(strcmp(mot,"resetPassword")==0)
        {
-        Serial.println(mot);
+        db9.println(mot);
         
         String pwd="NO";        
          
         if(writeString(eePWD,pwd)){
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
           
           password=pwd;
           char buf[100];
@@ -789,79 +895,79 @@ if(strcmp(mot,"$BARO")==0)
           password.toCharArray(buf,len+1);
            sprintf(msg,"$BARO,password,%s,\n",buf);
            sendUdpMsg(msg,sizeof(msg));
-            Serial.println(msg);
+            db9.println(msg);
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
           
        }
 
          if(strcmp(mot,"setWiFiConnect")==0)
        {
-        Serial.println("setWiFiConnect");
+        db9.println("setWiFiConnect");
         initWifi();
        }
 
        if(strcmp(mot,"setTimeoutWiFi")==0)
        {
-        Serial.println(mot);
+        db9.println(mot);
         char enTete[10];
         char type[20];
         unsigned int data;
 
-         Serial.print("copyTrame2 ");
-        Serial.println(copyTrame);
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%14s,%d,",&enTete,&type,&data);
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data ");
-        Serial.println(data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
         
         EEPROM.put(eeIntervalWifi,data);
          
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
            intervalWifi=data;
            sprintf(msg,"$BARO,timeoutWiFi,%d,\n",intervalWifi);
            sendUdpMsg(msg,sizeof(msg));
-            Serial.print(msg);
+            db9.println(msg);
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
           
        }
 
         if(strcmp(mot,"setBaudRate")==0)
        {
-        Serial.println(mot);
+        db9.println(mot);
         char enTete[10];
         char type[20];
         long data;
 
-         Serial.print("copyTrame2 ");
-        Serial.println(copyTrame);
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%11s,%d,",&enTete,&type,&data);
-        Serial.print("enTete ");
-        Serial.println(enTete);
-        Serial.print("type ");
-        Serial.println(type);
-        Serial.print("data ");
-        Serial.println(data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
         
         EEPROM.put(eeBaudRate,data);
          
         if (EEPROM.commit()) {
-           Serial.println("EEPROM successfully committed");
+           db9.println("EEPROM successfully committed");
            nBaudRate=data;
-           Serial.end();
-           initSerial();
+           db9.end();
+           initdb9();
            sprintf(msg,"$BARO,baudRate,%d,\n",nBaudRate);
            sendUdpMsg(msg,sizeof(msg));
-            Serial.print(msg);
+            db9.println(msg);
         } else {
-          Serial.println("ERROR! EEPROM commit failed");
+          db9.println("ERROR! EEPROM commit failed");
          }
           
        }
