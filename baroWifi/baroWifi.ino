@@ -1,4 +1,4 @@
-//VERSION 1.2
+//VERSION 1.3
 
 #include <Senses_wifi.h>
 #include <Wire.h>
@@ -40,6 +40,7 @@ int eePWD=110;
 int eeBaudRate=200;
 int eePortUdpSec=210;
 int eeMDAStatus=220;
+int eeVaisalaStatus=225;
 
 
 bool bFirstRun=false;
@@ -51,7 +52,7 @@ unsigned long previousBaro = 0;
 bool bWifiConnected=false;
 long nBaudRate=4800;
 bool bMDAStatus=false;
-
+bool bVaisalaStatus=false;
 
 
 
@@ -90,12 +91,14 @@ void loop() {
   float humidity=0;
   char cPression[9];
    char cTemp[7];
+   
    char cHumidity[5];
   char tramePress[50];
   char trameTemp[50];
   char trameHumidity[50];
   char trameWeather[100];
   char trameMDA[200];
+  char trameVaisala[100];
   int nCS=0;
   
 
@@ -118,25 +121,12 @@ void loop() {
     dtostrf(humidity, 5, 2, cHumidity);
    
     /*******Génération trame $IIXDR**********/
-    sprintf(tramePress, "$IIXDR,P,%s,B,Barometer*", cPression);
-    nCS=getCheckSum(tramePress);
-    sprintf(tramePress,"%s%02x",tramePress,nCS);
-   // db9.println(tramePress);
-
-    sprintf(trameTemp, "$IIXDR,C,%s,C,TempAir*", cTemp);
-    nCS=getCheckSum(trameTemp);
-    sprintf(trameTemp,"%s%02x",trameTemp,nCS);
-   // db9.println(trameTemp);
-
-    sprintf(trameHumidity,"$IIXDR,H,%s,P,Humidity*", cHumidity);
-    nCS=getCheckSum(trameHumidity);
-    sprintf(trameHumidity,"%s%02x",trameHumidity,nCS);
-   // db9.println(trameHumidity);
-
+   
     sprintf(trameWeather,"$IIXDR,P,%s,B,Barometer,C,%s,C,TempAir,H,%s,P,Humidity*",cPression,cTemp,cHumidity);
     nCS=getCheckSum(trameWeather);
-    sprintf(trameWeather,"%s%02x",trameWeather,nCS);
-    db9.println(trameWeather);
+    sprintf(trameWeather,"%s%02x\r\n",trameWeather,nCS);
+    if(bVaisalaStatus==0)
+      db9.print(trameWeather);
     sendUdpMsg(trameWeather,sizeof(trameWeather));
     sendUdpMsgSec(trameWeather,sizeof(trameWeather));
 
@@ -144,10 +134,23 @@ void loop() {
     {
     sprintf(trameMDA,"$IIMDA,0.0,I,%s,B,%s,C,0.0,C,%s,%s,0.0,C,0.0,T,0.0,M,0.0,N,0.0,N*",cPression,cTemp,cHumidity,cHumidity);
     nCS=getCheckSum(trameMDA);
-    sprintf(trameMDA,"%s%02x",trameMDA,nCS);
-    db9.println(trameMDA);
+    sprintf(trameMDA,"%s%02x\r\n",trameMDA,nCS);
+    if(bVaisalaStatus==0)
+      db9.print(trameMDA);
     sendUdpMsg(trameMDA,sizeof(trameMDA));
     sendUdpMsgSec(trameMDA,sizeof(trameMDA));
+    }
+
+    if(bVaisalaStatus==1)
+    {
+      char cTempV[7];
+      char cHumidityV[5];
+    
+      dtostrf(temperature, 6, 1, cTempV);
+      dtostrf(humidity, 6, 1, cHumidityV);
+      sprintf(trameVaisala,"  %s   %s   %s   %s\r \n",cTempV,cTempV,cTempV,cHumidityV);
+      //sprintf(trameVaisala,"    18.4     18.4     18.4     56.2\r \n");
+      db9.print(trameVaisala);
     }
     
      
@@ -166,7 +169,9 @@ void loop() {
     int strLen=sBuffer.length()+1;
     char db9Buffer[strLen];
     sBuffer.toCharArray(db9Buffer,strLen);
+   // sendUdpMsg(db9Buffer,sizeof(db9Buffer));
     decodeTrame(db9Buffer);
+    
   }
 
     
@@ -342,6 +347,7 @@ void initValues(void)
     EEPROM.put(eeFirstRun,bFirstRun);
     EEPROM.put(eePortUdpSec,10110);
     EEPROM.put(eeMDAStatus,false);
+    EEPROM.put(eeVaisalaStatus,false);
 
         if (EEPROM.commit()) {
            db9.println("EEPROM successfully committed");
@@ -365,6 +371,7 @@ void initValues(void)
   EEPROM.get(eeIntervalWifi,intervalWifi);
   EEPROM.get(eePortUdpSec,destPortSec);
   EEPROM.get(eeMDAStatus,bMDAStatus);
+  EEPROM.get(eeVaisalaStatus,bVaisalaStatus);
   
  
   
@@ -406,8 +413,8 @@ char msg[50];
 char copyTrame[100];
 strcpy(copyTrame,sTrame);
 
-db9.print("copyTrame ");
-db9.println(copyTrame);
+//db9.print("copyTrame ");
+//db9.println(copyTrame);
 
 
 mot=strtok(sTrame,",");
@@ -440,9 +447,9 @@ if(strcmp(mot,"$BARO")==0)
         EEPROM.begin(512);
         EEPROM.get(eePressAddress,OffsetPress);
         dtostrf(OffsetPress, 4, 0, cOffset);
-        sprintf(msg,"$BARO,PressureOffset,%s,\n",cOffset);
+        sprintf(msg,"$BARO,PressureOffset,%s,\r\n",cOffset);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
         
        }
 
@@ -452,49 +459,49 @@ if(strcmp(mot,"$BARO")==0)
         EEPROM.begin(512);
         EEPROM.get(eeTempAddress,OffsetTemp);
         dtostrf(OffsetTemp, 4, 0, cOffset);
-        sprintf(msg,"$BARO,TemperatureOffset,%s,\n",cOffset);
+        sprintf(msg,"$BARO,TemperatureOffset,%s,\r\n",cOffset);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getIpAddress")==0)
        {
         char ip[20];
         sprintf(ip,"%s",WiFi.localIP().toString().c_str());
-        sprintf(msg,"$BARO,IpAddress,%s,\n",ip);
+        sprintf(msg,"$BARO,IpAddress,%s,\r\n",ip);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getBroadcastAddress")==0)
        {
         char ip[20];
         sprintf(ip,"%s",destIP.toString().c_str());
-        sprintf(msg,"$BARO,BroadcastAddress,%s,\n",ip);
+        sprintf(msg,"$BARO,BroadcastAddress,%s,\r\n",ip);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
         
        }
        if(strcmp(mot,"getUdpPort")==0)
        {
-        sprintf(msg,"$BARO,UdpPort,%d,\n",destPort);
+        sprintf(msg,"$BARO,UdpPort,%d,\r\n",destPort);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getUdpPortSec")==0)
        {
-        sprintf(msg,"$BARO,UdpPortSec,%d,\n",destPortSec);
+        sprintf(msg,"$BARO,UdpPortSec,%d,\r\n",destPortSec);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getPeriod")==0)
        {
         db9.println("getPeriod");
-        sprintf(msg,"$BARO,period,%d,\n",intervalBaro);
+        sprintf(msg,"$BARO,period,%d,\r\n",intervalBaro);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getWiFiStatus")==0)
@@ -502,14 +509,14 @@ if(strcmp(mot,"$BARO")==0)
         db9.println("getWiFiStatus");
         if(bWifiConnected)
         {
-          sprintf(msg,"$BARO,WiFiConnected,true,\n");
+          sprintf(msg,"$BARO,WiFiConnected,true,\r\n");
         }
         else
         {
-          sprintf(msg,"$BARO,WiFiConnected,false,\n");
+          sprintf(msg,"$BARO,WiFiConnected,false,\r\n");
         }
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getSSID")==0)
@@ -518,31 +525,39 @@ if(strcmp(mot,"$BARO")==0)
         unsigned int len=ssid.length();
         ssid.toCharArray(buf,len+1);
         db9.println("getSSID");
-        sprintf(msg,"$BARO,SSID,%s,\n",buf);
+        sprintf(msg,"$BARO,SSID,%s,\r\n",buf);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getTimeoutWiFi")==0)
        {
-        sprintf(msg,"$BARO,timeoutWiFi,%d,\n",intervalWifi);
+        sprintf(msg,"$BARO,timeoutWiFi,%d,\r\n",intervalWifi);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getBaudRate")==0)
        {
-        sprintf(msg,"$BARO,baudRate,%d,\n",nBaudRate);
+        sprintf(msg,"$BARO,baudRate,%d,\r\n",nBaudRate);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
        }
 
        if(strcmp(mot,"getMDAStatus")==0)
        {
         db9.println("getMDAStatus");
-        sprintf(msg,"$BARO,MDAStatus,%d,\n",bMDAStatus);
+        sprintf(msg,"$BARO,MDAStatus,%d,\r\n",bMDAStatus);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
+       }
+
+       if(strcmp(mot,"getVaisalaStatus")==0)
+       {
+        db9.println("getVaisalaStatus");
+        sprintf(msg,"$BARO,VaisalaStatus,%d,\r\n",bVaisalaStatus);
+        sendUdpMsg(msg,sizeof(msg));
+        db9.print(msg);
        }
 
        if(strcmp(mot,"setPressureOffset")==0)
@@ -571,9 +586,9 @@ if(strcmp(mot,"$BARO")==0)
            OffsetPress=data;
            char cOffset[5];
            dtostrf(OffsetPress, 4, 0, cOffset);
-           sprintf(msg,"$BARO,PressureOffset,%s,\n",cOffset);
+           sprintf(msg,"$BARO,PressureOffset,%s,\r\n",cOffset);
             sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
           
            
         } else {
@@ -608,9 +623,9 @@ if(strcmp(mot,"$BARO")==0)
            OffsetTemp=data;
            char cOffset[5];
            dtostrf(OffsetTemp, 4, 0, cOffset);
-           sprintf(msg,"$BARO,TemperatureOffset,%s,\n",cOffset);
+           sprintf(msg,"$BARO,TemperatureOffset,%s,\r\n",cOffset);
             sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
           
         } else {
           db9.println("ERROR! EEPROM commit failed");
@@ -657,9 +672,9 @@ if(strcmp(mot,"$BARO")==0)
            destIP=ip;
            char sIp[20];
         sprintf(sIp,"%s",destIP.toString().c_str());
-        sprintf(msg,"$BARO,BroadcastAddress,%s,\n",sIp);
+        sprintf(msg,"$BARO,BroadcastAddress,%s,\r\n",sIp);
         sendUdpMsg(msg,sizeof(msg));
-        db9.println(msg);
+        db9.print(msg);
         
         } else {
           db9.println("ERROR! EEPROM commit failed");
@@ -689,9 +704,9 @@ if(strcmp(mot,"$BARO")==0)
         if (EEPROM.commit()) {
            db9.println("EEPROM successfully committed");
            destPort=data;
-           sprintf(msg,"$BARO,UdpPort,%d,\n",destPort);
+           sprintf(msg,"$BARO,UdpPort,%d,\r\n",destPort);
            sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
         } else {
           db9.println("ERROR! EEPROM commit failed");
          }
@@ -720,9 +735,9 @@ if(strcmp(mot,"$BARO")==0)
         if (EEPROM.commit()) {
            db9.println("EEPROM successfully committed");
            destPortSec=data;
-           sprintf(msg,"$BARO,UdpPortSec,%d,\n",destPortSec);
+           sprintf(msg,"$BARO,UdpPortSec,%d,\r\n",destPortSec);
            sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
         } else {
           db9.println("ERROR! EEPROM commit failed");
          }
@@ -751,9 +766,40 @@ if(strcmp(mot,"$BARO")==0)
         if (EEPROM.commit()) {
            db9.println("EEPROM successfully committed");
            bMDAStatus=data;
-           sprintf(msg,"$BARO,MDAStatus,%d,\n",bMDAStatus);
+           sprintf(msg,"$BARO,MDAStatus,%d,\r\n",bMDAStatus);
            sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
+        } else {
+          db9.println("ERROR! EEPROM commit failed");
+         }
+          
+       }
+
+       if(strcmp(mot,"setVaisalaStatus")==0)
+       {
+        db9.println(mot);
+        char enTete[10];
+        char type[20];
+        unsigned int data;
+
+         db9.print("copyTrame2 ");
+        db9.println(copyTrame);
+         sscanf(copyTrame,"%5s,%16s,%d,",&enTete,&type,&data);
+        db9.print("enTete ");
+        db9.println(enTete);
+        db9.print("type ");
+        db9.println(type);
+        db9.print("data ");
+        db9.println(data);
+        
+        EEPROM.put(eeVaisalaStatus,data);
+         
+        if (EEPROM.commit()) {
+           db9.println("EEPROM successfully committed");
+           bVaisalaStatus=data;
+           sprintf(msg,"$BARO,VaisalaStatus,%d,\r\n",bVaisalaStatus);
+           sendUdpMsg(msg,sizeof(msg));
+            db9.print(msg);
         } else {
           db9.println("ERROR! EEPROM commit failed");
          }
@@ -782,9 +828,9 @@ if(strcmp(mot,"$BARO")==0)
         if (EEPROM.commit()) {
            db9.println("EEPROM successfully committed");
            intervalBaro=data;
-           sprintf(msg,"$BARO,period,%d,\n",intervalBaro);
+           sprintf(msg,"$BARO,period,%d,\r\n",intervalBaro);
            sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
         } else {
           db9.println("ERROR! EEPROM commit failed");
          }
@@ -826,9 +872,9 @@ if(strcmp(mot,"$BARO")==0)
            char buf[100];
           unsigned int len=ssid.length();
           ssid.toCharArray(buf,len+1);
-           sprintf(msg,"$BARO,SSID,%s,\n",buf);
+           sprintf(msg,"$BARO,SSID,%s,\r\n",buf);
            sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
         }
         else
         {
@@ -845,8 +891,8 @@ if(strcmp(mot,"$BARO")==0)
         char data[100];
         String sData;
 
-         db9.print("copyTrame2 ");
-        db9.println(copyTrame);
+         //db9.print("copyTrame2 ");
+        //db9.println(copyTrame);
          sscanf(copyTrame,"%5s,%11s,%s,",&enTete,&type,&data);
          sData=data;
          int vir=sData.lastIndexOf(",");
@@ -868,9 +914,9 @@ if(strcmp(mot,"$BARO")==0)
            char buf[100];
           unsigned int len=password.length();
           password.toCharArray(buf,len+1);
-           sprintf(msg,"$BARO,password,%s,\n",buf);
+           sprintf(msg,"$BARO,password,%s,\r\n",buf);
            //sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
         }
         else
         {
@@ -893,9 +939,9 @@ if(strcmp(mot,"$BARO")==0)
           char buf[100];
           unsigned int len=password.length();
           password.toCharArray(buf,len+1);
-           sprintf(msg,"$BARO,password,%s,\n",buf);
+           sprintf(msg,"$BARO,password,%s,\r\n",buf);
            sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
         } else {
           db9.println("ERROR! EEPROM commit failed");
          }
@@ -930,9 +976,9 @@ if(strcmp(mot,"$BARO")==0)
         if (EEPROM.commit()) {
            db9.println("EEPROM successfully committed");
            intervalWifi=data;
-           sprintf(msg,"$BARO,timeoutWiFi,%d,\n",intervalWifi);
+           sprintf(msg,"$BARO,timeoutWiFi,%d,\r\n",intervalWifi);
            sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
         } else {
           db9.println("ERROR! EEPROM commit failed");
          }
@@ -963,9 +1009,9 @@ if(strcmp(mot,"$BARO")==0)
            nBaudRate=data;
            db9.end();
            initdb9();
-           sprintf(msg,"$BARO,baudRate,%d,\n",nBaudRate);
+           sprintf(msg,"$BARO,baudRate,%d,\r\n",nBaudRate);
            sendUdpMsg(msg,sizeof(msg));
-            db9.println(msg);
+            db9.print(msg);
         } else {
           db9.println("ERROR! EEPROM commit failed");
          }
