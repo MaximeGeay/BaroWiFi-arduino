@@ -1,9 +1,10 @@
-//VERSION 1.3
+//VERSION 1.4
 
 #include <Senses_wifi.h>
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BME680.h>
+//#include <Adafruit_BME680.h>
+#include <Adafruit_BME280.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <EEPROM.h>
@@ -24,7 +25,8 @@ char packetBuffer[UDP_TX_PACKET_MAX_SIZE]; //buffer to hold incoming packet,
 
 WiFiUDP UDP;
 WiFiUDP UDPSec;
-Adafruit_BME680 bme; // I2C
+//Adafruit_BME680 bme; // I2C
+Adafruit_BME280 bme; // I2C
 
 int OffsetPress=0; //enPa
 int OffsetTemp=0; //en°C
@@ -71,12 +73,11 @@ initWifi();
   }
 
   // Set up oversampling and filter initialization
-  bme.setTemperatureOversampling(BME680_OS_8X);
-  bme.setHumidityOversampling(BME680_OS_2X);
-  bme.setPressureOversampling(BME680_OS_4X);
-  bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
-  bme.setGasHeater(320, 150); // 320*C for 150 ms
-
+  //bme.setTemperatureOversampling(BME680_OS_8X);
+ // bme.setHumidityOversampling(BME680_OS_2X);
+ // bme.setPressureOversampling(BME680_OS_4X);
+ // bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
+//bme.setGasHeater(320, 150); // 320*C for 150 ms
 
   
 }
@@ -105,19 +106,22 @@ void loop() {
 
   if ((unsigned long)(currentMillis - previousBaro) >= intervalBaro)
  {
+  /*
       if (! bme.performReading()) {
       db9.println("Failed to perform reading :(");
       return;
       }
-
-
-    pressure = bme.pressure+OffsetPress;
+*/
+   // pressure = bme.pressure+OffsetPress;
+    pressure = bme.readPressure()+OffsetPress;
     dtostrf(pressure / 100000, 7, 5, cPression);
 
-    temperature=bme.temperature+float(OffsetTemp/10);
+    //temperature=bme.temperature+float(OffsetTemp/10);
+    temperature=bme.readTemperature()+float(OffsetTemp/10);
     dtostrf(temperature, 5, 2, cTemp);
 
-    humidity=bme.humidity;
+    //humidity=bme.humidity;
+    humidity=bme.readHumidity();
     dtostrf(humidity, 5, 2, cHumidity);
    
     /*******Génération trame $IIXDR**********/
